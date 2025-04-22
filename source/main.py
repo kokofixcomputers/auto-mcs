@@ -1,6 +1,8 @@
 # Local imports
 from svrmgr import ServerManager
 import constants
+from menu import run_application
+from headless import run_application as run_headless_application
 
 
 # Run app, eventually in wrapper
@@ -36,14 +38,11 @@ def mainLoop():
 
     # Only start the GUI if not headless
     if not constants.headless:
-        from menu import run_application
+        run_application()
 
     # Otherwise, start a loop for a CLI interpreter with basic commands
     else:
-        from headless import run_application
-
-    run_application()
-
+        run_headless_application()
 
 
 # ----------------------------------------------------------------------------------------------
