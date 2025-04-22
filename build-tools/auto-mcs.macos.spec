@@ -9,7 +9,7 @@ from glob import glob
 
 
 block_cipher = None
-hiddenimports = ['plyer.platforms.macosx.filechooser', 'PIL._tkinter_finder', 'dataclasses', 'nbt.world', 'pkg_resources.extern', 'menu.py']
+hiddenimports = ['plyer.platforms.macosx.filechooser', 'PIL._tkinter_finder', 'dataclasses', 'nbt.world', 'pkg_resources.extern', 'menu']
 hiddenimports.extend(collect_submodules('uvicorn'))
 
 
