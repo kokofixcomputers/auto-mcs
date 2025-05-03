@@ -43,7 +43,7 @@ import amscript
 
 app_version = "2.3"
 ams_version = "1.4"
-telepath_version = "1.0.5"
+telepath_version = "1.1"
 app_title = "auto-mcs"
 
 dev_version = False
@@ -369,6 +369,7 @@ def apply_template(template: dict):
 
     # Get telepath data
     telepath_data = None
+    name_list = server_list_lower
     if new_server_info:
         telepath_data = new_server_info['_telepath_data']
 
@@ -376,11 +377,12 @@ def apply_template(template: dict):
 
     if telepath_data:
         new_server_info['_telepath_data'] = telepath_data
+        name_list = get_remote_var('server_list_lower', telepath_data)
 
     t = template['server']
     s = t['settings']
 
-    new_server_info["name"] = new_server_name(template['template']['name'])
+    new_server_info["name"] = new_server_name(template['template']['name'], name_list)
     new_server_info["type"] = t["type"]
     new_server_info["version"] = t["version"]
     new_server_info['server_settings']["world"] = "world" if not s["world"]["path"] else s["world"]["path"]
@@ -612,7 +614,7 @@ def check_free_space(telepath_data=None):
     return free_space > 1024
 
 def telepath_busy():
-    return ignore_close and server_manager.remote_server
+    return ignore_close and server_manager.remote_servers
 
 
 # Retrieves the refresh rate of the display to calculate consistent animation speed
@@ -685,7 +687,7 @@ def check_app_version(current, latest, limit=None):
         return False
 
 
-# Restarts auto-mcs by dynamically generating script
+# Restarts auto-mcs by dynamically generating a script
 def restart_app(*a):
     executable = os.path.basename(launch_path)
     script_name = 'auto-mcs-reboot'
@@ -731,7 +733,7 @@ rm \"{os.path.join(tempDir, script_name)}\""""
     sys.exit()
 
 
-# Restarts and updates auto-mcs by dynamically generating script
+# Restarts and updates auto-mcs by dynamically generating a script
 def restart_update_app(*a):
     executable = os.path.basename(launch_path)
     new_version = update_data['version']
@@ -2555,9 +2557,9 @@ def push_new_server(server_info: dict, import_info={}):
 
 
 # Generate new server name
-def new_server_name(existing_server=None, s_list=server_list_lower):
+def new_server_name(existing_server=None, s_list=None):
     pattern = r'\s\(\d+\)$'
-    if not s_list:
+    if s_list is None:
         generate_server_list()
         s_list = server_list_lower
     def iter_name(new_name):
@@ -2991,12 +2993,12 @@ def iter_addons(progress_func=None, update=False, telepath=False):
         progress_func(100)
 
     return True
-def pre_addon_update(telepath=False):
+def pre_addon_update(telepath=False, host=None):
     global new_server_info
     server_obj = server_manager.current_server
 
     if telepath:
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[host]
 
     # If remote, do this through telepath
     else:
@@ -3020,14 +3022,14 @@ def pre_addon_update(telepath=False):
     # Generate server info for downloading proper add-on versions
     new_server_init()
     new_server_info = server_obj.properties_dict()
-    init_update(telepath=telepath)
+    init_update(telepath=telepath, host=host)
     new_server_info['addon_objects'] = server_obj.addon.return_single_list()
-def post_addon_update(telepath=False):
+def post_addon_update(telepath=False, host=None):
     global new_server_info
     server_obj = server_manager.current_server
 
     if telepath:
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[host]
 
     # If remote, do this through telepath
     else:
@@ -3549,12 +3551,12 @@ def update_server_files(progress_func=None):
             run_proc(f"attrib +H \"{os.path.join(new_path, server_ini)}\"")
 
         return True
-def pre_server_update(telepath=False):
+def pre_server_update(telepath=False, host=None):
     global new_server_info
     server_obj = server_manager.current_server
 
     if telepath:
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[host]
 
     # If remote, do this through telepath
     else:
@@ -3617,12 +3619,12 @@ def pre_server_update(telepath=False):
         data = f'Modifying server.jar: {server_obj.type} {server_obj.version} --> {new_server_info["type"]} {new_server_info["version"]}'
         api_manager.logger._report(f'create.pre_server_update', extra_data=data, server_name=server_obj.name)
 
-def post_server_update(telepath=False):
+def post_server_update(telepath=False, host=None):
     global new_server_info
     server_obj = server_manager.current_server
 
     if telepath:
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[host]
 
     # If remote, do this through telepath
     else:
@@ -4082,7 +4084,7 @@ eula=true"""
                             # Ignore flags with invalid data
                             if ("%" in flag or "${" in flag or '-Xmx' in flag or '-Xms' in flag or len(flag) < 5) and (not flag.strip().startswith('@')):
                                 continue
-                            for exclude in ['-install', '-server', '-jar', '--nogui', '-nogui', '-Command', '-fullversion', '-version', '-mcversion', '-loader', '-downloadminecraft']:
+                            for exclude in ['-install', '-server', '-jar', '--nogui', '-nogui', '-Command', '-fullversion', '-version', '-mcversion', '-loader', '-downloadminecraft', '-mirror']:
                                 if exclude in flag:
                                     break
 
@@ -4117,11 +4119,11 @@ eula=true"""
 
                 # Delete all *.jar files in directory
                 for jar in glob(os.path.join(tmpsvr, '*.jar'), recursive=False):
-                    if not ((jar.startswith('minecraft_server') and import_data['type'] == 'forge') or (file_name in jar)):
+                    if not ((jar.startswith('minecraft_server') and import_data['type'] == 'forge') or (file_name and file_name in jar)):
                         os.remove(jar)
 
                     # Rename actual .jar file to server.jar to prevent crashes
-                    if file_name in jar:
+                    if file_name and file_name in jar:
                         run_proc(f"{'move' if os_name == 'windows' else 'mv'} \"{os.path.join(tmpsvr, os.path.basename(jar))}\" \"{os.path.join(tmpsvr, 'server.jar')}\"")
 
 
@@ -4163,6 +4165,11 @@ eula=true"""
 
             try:
                 config_file.set('general', 'enableProxy', str(import_data['config_file'].get('general', 'enableProxy')).lower())
+            except configparser.NoOptionError:
+                pass
+
+            try:
+                config_file.set('general', 'consoleFilter', str(import_data['config_file'].get('general', 'consoleFilter')).lower())
             except configparser.NoOptionError:
                 pass
 
@@ -4415,7 +4422,7 @@ def scan_modpack(update=False, progress_func=None):
             # Ignore flags with invalid data
             if ("%" in flag or "${" in flag or '-Xmx' in flag or '-Xms' in flag or len(flag) < 5) and (not flag.strip().startswith('@')):
                 continue
-            for exclude in ['-install', '-server', '-jar', '--nogui', '-nogui', '-Command', '-fullversion', '-version', '-mcversion', '-loader', '-downloadminecraft']:
+            for exclude in ['-install', '-server', '-jar', '--nogui', '-nogui', '-Command', '-fullversion', '-version', '-mcversion', '-loader', '-downloadminecraft', '-mirror']:
                 if exclude in flag:
                     break
 
@@ -4924,9 +4931,9 @@ eula=true"""
 
 
 # Generates new information for a server update
-def init_update(telepath=False):
+def init_update(telepath=False, host=None):
     if telepath:
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[host]
     else:
         server_obj = server_manager.current_server
     new_server_info['name'] = server_obj.name
@@ -4956,7 +4963,7 @@ def init_update(telepath=False):
 # Updates a world in a server
 def update_world(path: str, new_type='default', new_seed='', telepath_data={}):
     if telepath_data:
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[telepath_data['host']]
 
         # Report to telepath logger
         api_manager.logger._report(f'main.update_world', extra_data=f'Changing world: {path}', server_name=server_obj.name)
@@ -4998,12 +5005,12 @@ def update_world(path: str, new_type='default', new_seed='', telepath_data={}):
 
 
 # Clones a server with support for Telepath
-def clone_server(server_obj: object or str, progress_func=None, *args):
+def clone_server(server_obj: object or str, progress_func=None, host=None, *args):
 
     if server_obj == '$remote':
         source_data = None
         destination_data = None
-        server_obj = server_manager.remote_server
+        server_obj = server_manager.remote_servers[host]
 
     else:
         source_data = server_obj._telepath_data
@@ -5948,8 +5955,8 @@ def gather_config_files(name: str, max_depth: int = 3) -> dict[str, list[str]]:
     root = server_path(name)
     excludes = [
         'version_history.json', 'version_list.json', 'usercache.json', 'banned-players.json', 'banned-ips.json',
-        'whitelist.json', 'ops.json', 'ops.txt', 'whitelist.txt', 'banned-players.txt', 'banned-ips.txt', 'eula.txt',
-        'bans.txt', 'modrinth.index.json', 'amscript', server_ini
+        'banned-subnets.json', 'whitelist.json', 'ops.json', 'ops.txt', 'whitelist.txt', 'banned-players.txt',
+        'banned-ips.txt', 'eula.txt', 'bans.txt', 'modrinth.index.json', 'amscript', server_ini
     ]
     final_dict = {}
 
@@ -6892,11 +6899,11 @@ class SearchManager():
 
             'Server': [
                 ScreenObject('Server Manager', 'ServerViewScreen', {'Launch server': None, 'Stop server': None, 'Restart server': None, 'Enter console commands': None}),
-                ScreenObject('Back-up Manager', 'ServerBackupScreen', {'Save a back-up now': None, 'Restore from a back-up': 'ServerBackupRestoreScreen', 'Enable automatic back-ups': None, 'Specify maximum back-ups': None, 'Open back-up directory': None, 'Migrate back-up directory': None}, ['backup', 'revert', 'snapshot', 'restore', 'save']),
+                ScreenObject('Back-up Manager', 'ServerBackupScreen', {'Save a back-up now': None, 'Restore from a back-up': 'ServerBackupRestoreScreen', 'Enable automatic back-ups': None, 'Specify maximum back-ups': None, 'Open back-up directory': None, 'Migrate back-up directory': None, 'Clone this server': 'ServerCloneScreen'}, ['backup', 'revert', 'snapshot', 'restore', 'save', 'clone']),
                 ScreenObject('Access Control', 'ServerAclScreen', {'Configure bans': None, 'Configure operators': None, 'Configure the whitelist': None}, ['player', 'user', 'ban', 'white', 'op', 'rule', 'ip', 'acl', 'access control']),
                 ScreenObject('Add-on Manager', 'ServerAddonScreen', {'Download add-ons': 'ServerAddonSearchScreen', 'Import add-ons': None, 'Toggle add-on state': None, 'Update add-ons': None}, ['mod', 'plugin', 'addon', 'extension']),
                 ScreenObject('Script Manager', 'ServerAmscriptScreen', {'Download scripts': 'ServerAmscriptSearchScreen', 'Import scripts': None, 'Create a new script': 'CreateAmscriptScreen', 'Edit a script': None, 'Open script directory': None}, ['amscript', 'script', 'ide', 'develop']),
-                ScreenObject('Server Settings', 'ServerSettingsScreen', {"Edit configuration files": None, "Edit 'server.properties'": None, 'Open server directory': None, 'Specify memory usage': None, 'Change MOTD': None, 'Specify IP/port': None, 'Change launch flags': None, 'Enable proxy (playit)': None, 'Install proxy (playit)': None, 'Enable Bedrock support': None, 'Enable automatic updates': None, 'Update this server': None, "Change 'server.jar'": 'MigrateServerTypeScreen', 'Rename this server': None, 'Change world file': 'ServerWorldScreen', 'Delete this server': None}, ['ram', 'memory', 'server.properties', 'properties', 'rename', 'delete', 'bedrock', 'proxy', 'ngrok', 'playit', 'update', 'jvm', 'motd', 'yml', 'config'])
+                ScreenObject('Server Settings', 'ServerSettingsScreen', {"Edit configuration files": 'ServerConfigScreen', "Edit 'server.properties'": None, 'Open server directory': None, 'Specify memory usage': None, 'Change MOTD': None, 'Specify IP/port': None, 'Change launch flags': None, 'Enable proxy (playit)': None, 'Install proxy (playit)': None, 'Enable Bedrock support': None, 'Enable automatic updates': None, 'Update this server': None, "Change 'server.jar'": 'MigrateServerTypeScreen', 'Rename this server': None, 'Change world file': 'ServerWorldScreen', 'Delete this server': None}, ['ram', 'memory', 'server.properties', 'properties', 'rename', 'delete', 'bedrock', 'proxy', 'ngrok', 'playit', 'update', 'jvm', 'motd', 'yml', 'config'])
             ]
         }
 
